@@ -4,44 +4,40 @@ import sys
 import threading
 import socket
 import struct
-from base64 import b64encode, b64decode
 import time
+import base64
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 import uvicorn
 import websockets
 
-from Crypto.Cipher import AES
-from Crypto.Random import get_random_bytes
-
 # -------------------- Terminal colors --------------------
 ANSI_COLORS = [
-   "\033[91m",  # Red
-   "\033[92m",  # Green
-   "\033[93m",  # Yellow
-   "\033[94m",  # Blue
-   "\033[95m",  # Magenta
-   "\033[96m",  # Cyan
-   "\033[97m",  # White
+    "\033[91m",  # Red
+    "\033[92m",  # Green
+    "\033[93m",  # Yellow
+    "\033[94m",  # Blue
+    "\033[95m",  # Magenta
+    "\033[96m",  # Cyan
+    "\033[97m",  # White
 ]
 ANSI_RESET = "\033[0m"
 
 WEB_COLORS = [
-   "red",
-   "green",
-   "yellow",
-   "blue",
-   "magenta",
-   "cyan",
-   "white",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "white",
 ]
 
 # -------------------- Clear terminal --------------------
 os.system('cls' if os.name == 'nt' else 'clear')
 
 app = FastAPI()
-
 clients = set()
 client_info = {}  # websocket -> {"id": int, "color_idx": int}
 next_user_id = 1
@@ -83,7 +79,7 @@ def base36_decode(s: str) -> int:
 def encode_ip_port(ip: str, port: int) -> str:
     ip_int = struct.unpack("!I", socket.inet_aton(ip))[0]
     combined = (ip_int << 16) + port
-    return base36_encode(combined)[:14]  # slightly longer password
+    return base36_encode(combined)[:14]
 
 def decode_ip_port(code: str):
     combined = base36_decode(code)
@@ -92,19 +88,21 @@ def decode_ip_port(code: str):
     ip = socket.inet_ntoa(struct.pack("!I", ip_int))
     return ip, port
 
-# -------------------- AES encryption --------------------
-AES_KEY = get_random_bytes(16)
-AES_IV = get_random_bytes(16)
+# -------------------- XOR “encryption” --------------------
+ENCRYPTION_KEY = "supersecret"
 
-def encrypt_message(message: str) -> str:
-    cipher = AES.new(AES_KEY, AES.MODE_CFB, AES_IV)
-    encrypted = cipher.encrypt(message.encode())
-    return b64encode(encrypted).decode()
+def encrypt_message(message: str, key=ENCRYPTION_KEY) -> str:
+    key_len = len(key)
+    encrypted_bytes = bytes([b ^ ord(key[i % key_len]) for i, b in enumerate(message.encode())])
+    return base64.b64encode(encrypted_bytes).decode()
 
-def decrypt_message(message: str) -> str:
-    cipher = AES.new(AES_KEY, AES.MODE_CFB, AES_IV)
-    decrypted = cipher.decrypt(b64decode(message.encode()))
-    return decrypted.decode()
+def decrypt_message(message: str, key=ENCRYPTION_KEY) -> str:
+    try:
+        encrypted_bytes = base64.b64decode(message)
+        decrypted_bytes = bytes([b ^ ord(key[i % len(key)]) for i, b in enumerate(encrypted_bytes)])
+        return decrypted_bytes.decode()
+    except:
+        return message
 
 # -------------------- FastAPI Web --------------------
 @app.get("/", response_class=HTMLResponse)
@@ -395,13 +393,10 @@ if __name__ == "__main__":
         print(f"Share this password with others: {password}")
         print(f"Clients can connect via ws://{ip}:{port}/ws or open http://{ip}:{port}/ in browser\n")
 
-        # Run server in background
         def run_uvicorn():
             uvicorn.run(app, host="0.0.0.0", port=port)
         server_thread = threading.Thread(target=run_uvicorn, daemon=True)
         server_thread.start()
 
         time.sleep(1)
-
-        # Host also runs terminal client
         asyncio.run(terminal_client(f"ws://{ip}:{port}/ws"))
